@@ -93,10 +93,7 @@ function chunkToUtf8String(chunk) {
             filteredChunk.pop() // 移除已添加的前一个字节
             i++ // 跳过当前的 0x0A
         } else {
-            // 只添加可打印字符和必要的控制字符
-            if (chunk[i] >= 0x20 || chunk[i] === 0x0A) {  // 0x20是空格，第一个可打印字符
-                filteredChunk.push(chunk[i])
-            }
+            filteredChunk.push(chunk[i])
             i++
         }
     }
@@ -110,9 +107,7 @@ function chunkToUtf8String(chunk) {
     // 转换为字符串并清理
     const result = Buffer.from(filteredChunk)
         .toString('utf-8')
-        .replace(/[\u0000-\u001F]/g, '') // 移除所有控制字符
-        .replace(/\s+/g, ' ')  // 将多个空白字符替换为单个空格
-        .trim()
+        .replace(/[\u0000-\u0009\u000B\u000C-\u001F]/g, '') // 移除控制字符，但保留 \u000A (换行符)
 
     return result
 }
