@@ -61,62 +61,50 @@ function stringToHex (str, modelName) {
 }
 
 // 封装函数，用于将 chunk 转换为 UTF-8 字符串
-function chunkToUtf8String (chunk) {
-  // 只处理以 0x00 0x00 0x00 0x00 开头的 chunk，其他不处理，不然会有乱码
-  if (!(chunk[0] === 0x00 && chunk[1] === 0x00)) {
-    return ''
-  }
-
-  console.log('chunk:', Buffer.from(chunk).toString('hex'))
-  console.log('chunk string:', Buffer.from(chunk).toString('utf-8'))
-
-  // 去掉 chunk 中 0x0A 以及之前的字符
-  chunk = chunk.slice(chunk.indexOf(0x0A) + 1)
-
-  let filteredChunk = []
-  let i = 0
-  while (i < chunk.length) {
-    // 新的条件过滤：如果遇到连续4个0x00，则移除其之后所有的以 0 开头的字节（0x00 到 0x0F）
-    if (chunk.slice(i, i + 4).every(byte => byte === 0x00)) {
-      i += 4 // 跳过这4个0x00
-      while (i < chunk.length && chunk[i] >= 0x00 && chunk[i] <= 0x0F) {
-        i++ // 跳过所有以 0 开头的字节
-      }
-      continue
+function chunkToUtf8String(chunk) {
+    // 只处理以 0x00 0x00 开头的 chunk，其他不处理，不然会有乱码
+    if (!(chunk[0] === 0x00 && chunk[1] === 0x00)) {
+        return ''
     }
 
-    if (chunk[i] === 0x0C) {
-      // 遇到 0x0C 时，跳过 0x0C 以及后续的所有连续的 0x0A
-      i++ // 跳过 0x0C
-      while (i < chunk.length && chunk[i] === 0x0A) {
-        i++ // 跳过所有连续的 0x0A
-      }
-    } else if (
-      i > 0 &&
-      chunk[i] === 0x0A &&
-      chunk[i - 1] >= 0x00 &&
-      chunk[i - 1] <= 0x09
-    ) {
-      // 如果当前字节是 0x0A，且前一个字节在 0x00 至 0x09 之间，跳过前一个字节和当前字节
-      filteredChunk.pop() // 移除已添加的前一个字节
-      i++ // 跳过当前的 0x0A
-    } else {
-      filteredChunk.push(chunk[i])
-      i++
+    // 去掉 chunk 中 0x0A 以及之前的字符
+    chunk = chunk.slice(chunk.indexOf(0x0A) + 1)
+
+    let filteredChunk = []
+    let i = 0
+    while (i < chunk.length) {
+        // 如果遇到连续4个0x00，则移除其之后所有的以 0 开头的字节（0x00 到 0x0F）
+        if (chunk.slice(i, i + 4).every(byte => byte === 0x00)) {
+            i += 4 // 跳过这4个0x00
+            while (i < chunk.length && chunk[i] >= 0x00 && chunk[i] <= 0x0F) {
+                i++ // 跳过所有以 0 开头的字节
+            }
+            continue
+        }
+
+        if (chunk[i] === 0x0C) {
+            // 遇到 0x0C 时，跳过 0x0C 以及后续的所有连续的 0x0A
+            i++ // 跳过 0x0C
+            while (i < chunk.length && chunk[i] === 0x0A) {
+                i++ // 跳过所有连续的 0x0A
+            }
+        } else if (i > 0 && chunk[i] === 0x0A && chunk[i - 1] >= 0x00 && chunk[i - 1] <= 0x09) {
+            // 如果当前字节是 0x0A，且前一个字节在 0x00 至 0x09 之间，跳过前一个字节和当前字节
+            filteredChunk.pop() // 移除已添加的前一个字节
+            i++ // 跳过当前的 0x0A
+        } else {
+            filteredChunk.push(chunk[i])
+            i++
+        }
     }
-  }
 
-  // 第二步：去除所有的 0x00 和 0x0C
-  filteredChunk = filteredChunk.filter((byte) => byte !== 0x00 && byte !== 0x0C)
+    // 第二步：去除所有的 0x00 和 0x0C
+    filteredChunk = filteredChunk.filter((byte) => byte !== 0x00 && byte !== 0x0C)
 
-  // 去除小于 0x0A 的字节
-  filteredChunk = filteredChunk.filter((byte) => byte >= 0x0A)
+    // 去除小于 0x0A 的字节
+    filteredChunk = filteredChunk.filter((byte) => byte >= 0x0A)
 
-  const hexString = Buffer.from(filteredChunk).toString('hex')
-  console.log('hexString:', hexString)
-  const utf8String = Buffer.from(filteredChunk).toString('utf-8')
-  console.log('utf8String:', utf8String)
-  return utf8String
+    return Buffer.from(filteredChunk).toString('utf-8')
 }
 
 module.exports = {
