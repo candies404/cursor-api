@@ -9,6 +9,56 @@ const invalidTokens = new Map();
 // 在文件顶部添加一个计数器来追踪每个 token 的使用次数
 const tokenUsageCount = new Map();
 
+// 添加 Map 用于存储 token 对应的 checksum
+const tokenChecksumMap = new Map();
+
+/**
+ * 获取或生成 checksum
+ * @param {string} token - 认证 token
+ * @param {Object} req - 请求对象
+ * @returns {string} checksum
+ */
+function getOrCreateChecksum(token, req) {
+  const now = Date.now();
+  const cached = tokenChecksumMap.get(token);
+  
+  // 检查缓存是否过期（例如 24 小时）
+  if (cached && now - cached.timestamp < 24 * 60 * 60 * 1000) {
+    return cached.checksum;
+  }
+  
+  return req.headers['x-cursor-checksum'] ??
+         process.env['x-cursor-checksum'] ??
+         generateNewChecksum(token);
+}
+
+/**
+ * 生成新的 checksum 并保存到 Map
+ * @param {string} token - 认证 token
+ * @returns {string} 新生成的 checksum
+ */
+function generateNewChecksum(token) {
+  const checksum = `zo${getRandomIDPro({ dictType: 'max', size: 6 })}${
+    getRandomIDPro({ dictType: 'max', size: 64 })
+  }/${
+    getRandomIDPro({ dictType: 'max', size: 64 })
+  }`;
+  
+  tokenChecksumMap.set(token, {
+    checksum,
+    timestamp: Date.now()
+  });
+  
+  // 打印生成信息
+  const maskedToken = `${token.slice(0, 10)}...${token.slice(-10)}`;
+  console.log(`\n=== 新生成 Checksum ===`);
+  console.log(`Token: ${maskedToken}`);
+  console.log(`Checksum: ${checksum}`);
+  console.log(`生成时间: ${new Date().toLocaleString()} (${Intl.DateTimeFormat().resolvedOptions().timeZone})\n`);
+  
+  return checksum;
+}
+
 /**
  * 检查 token 是否有效
  * @param {string} token - 需要检查的 token
@@ -35,7 +85,10 @@ function markTokenAsInvalid(token) {
   // 只显示 token 后 10 位，保护隐私
   const maskedToken = `...${token.slice(-10)}`;
   console.log(`Token ${maskedToken} 已被加入黑名单`);
-  console.log(`失效时间: ${new Date(expireTime).toISOString()}`);
+  console.log(`禁用时间: ${new Date(expireTime).toLocaleString()} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`);
+  
+  // 当 token 被加入黑名单时，同时删除其对应的 checksum
+  // tokenChecksumMap.delete(token);
 }
 
 // 中间件配置
@@ -84,8 +137,14 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     // 如果没有有效的 token，返回错误
     if (validTokens.length === 0) {
+      console.log('=============== Token验证失败请求结束 ===============\n');
       return res.status(401).json({
-        error: 'No valid authorization tokens available'
+        error: {
+          code: "invalid_token",
+          message: "No valid authorization tokens available",
+          type: "authentication_error",
+          param: null
+        }
       });
     }
 
@@ -116,12 +175,20 @@ app.post('/v1/chat/completions', async (req, res) => {
       // 分割线
       console.log('\n=============== 请求开始 ===============\n');
       
-      // 打印所有可用 token 的使用情况
-      console.log('=== Token 使用情况 ===');
+      // 打印所有可用 token 的使用情况和对应的 checksum
+      console.log('=== Token 使用情况与 Checksum ===');
       validTokens.forEach(token => {
         const count = tokenUsageCount.get(token.processed) || 0;
         const maskedToken = `${token.processed.slice(0, 10)}...${token.processed.slice(-10)}`;
-        console.log(`Token ${maskedToken}: ${count}次`);
+        const checksumInfo = tokenChecksumMap.get(token.processed);
+        const checksum = checksumInfo ? checksumInfo.checksum : '未生成';
+        console.log(`Token ${maskedToken}:`);
+        console.log(`  使用次数: ${count}次`);
+        console.log(`  Checksum: ${checksum}`);
+        // if (checksumInfo) {
+        //   console.log(`  生成时间: ${new Date(checksumInfo.timestamp).toLocaleString()} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`);
+        // }
+        console.log(''); // 空行分隔
       });
       
       // 打印当前选中的 token 信息
@@ -130,17 +197,31 @@ app.post('/v1/chat/completions', async (req, res) => {
       console.log(`正在使用 Token: ${selectedMaskedToken}`);
       console.log(`当前可用 Token 数量: ${validTokens.length}`);
       
+      // 获取或生成 checksum
+      const checksum = getOrCreateChecksum(authToken, req);
+      
+      // 打印 checksum 来源
+      console.log('=== Checksum 信息 ===');
+      if (req.headers['x-cursor-checksum']) {
+        console.log('来源: 请求头');
+        // console.log(`值: ${checksum}`);
+      } else if (process.env['x-cursor-checksum']) {
+        console.log('来源: 环境变量');
+        // console.log(`值: ${checksum}`);
+      } else if (tokenChecksumMap.get(authToken)) {
+        console.log('来源: Token缓存');
+        // console.log(`值: ${checksum}`);
+        // console.log(`上次生成时间: ${new Date(tokenChecksumMap.get(authToken).timestamp).toLocaleString()} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`);
+      } else {
+        console.log('来源: 新生成');
+        // console.log(`值: ${checksum}`);
+      }
+      
       // 更新使用计数
       tokenUsageCount.set(authToken, currentUsageCount + 1);
       
       // 将消息转换为十六进制格式
       const hexData = await stringToHex(messages, model);
-
-      // 获取 checksum，优先级：请求头 > 环境变量 > 随机生成
-      const checksum =
-        req.headers['x-cursor-checksum'] ??
-        process.env['x-cursor-checksum'] ??
-        `zo${getRandomIDPro({ dictType: 'max', size: 6 })}${getRandomIDPro({ dictType: 'max', size: 64 })}/${getRandomIDPro({ dictType: 'max', size: 64 })}`;
 
       // 发起请求
       const response = await fetch('https://api2.cursor.sh/aiserver.v1.AiService/StreamChat', {
@@ -162,7 +243,7 @@ app.post('/v1/chat/completions', async (req, res) => {
         body: hexData,
       });
 
-      /**
+            /**
        * 处理错误响应的通用函数
        * @param {Object} jsonResponse - 错误响应对象
        * @returns {boolean} - 是否需要重试
@@ -201,12 +282,13 @@ app.post('/v1/chat/completions', async (req, res) => {
           try {
             // 尝试解析 JSON，检查是否是错误响应
             const jsonResponse = JSON.parse(text);
-            if (jsonResponse.error) {
+              if (jsonResponse.error) {
               if (handleErrorResponse(jsonResponse)) {
                 return makeRequest(); // 重试请求
               }
               hasError = true;
               res.write(`data: ${text}\n\n`); // 返回原始错误信息
+              console.log('=============== 错误请求结束 ===============\n');
               return res.end();
             }
           } catch (e) {
@@ -221,7 +303,7 @@ app.post('/v1/chat/completions', async (req, res) => {
                   choices: [
                     {
                       index: 0,
-                      delta: {
+                       delta: {
                         content: text,
                       },
                     },
@@ -236,6 +318,7 @@ app.post('/v1/chat/completions', async (req, res) => {
         if (!hasError) {
           res.write('data: [DONE]\n\n');
         }
+        console.log('=============== 流式请求结束 ===============\n');
         return res.end();
       } else {
         // 处理非流式响应
@@ -290,7 +373,7 @@ app.post('/v1/chat/completions', async (req, res) => {
           // console.log(text);
           
           // 返回标准格式的响应
-          console.log('\n=============== 请求结束 ===============\n');
+          console.log('=============== 请求结束 ===============\n');
           return res.json({
             id: `chatcmpl-${uuidv4()}`,
             object: 'chat.completion',
@@ -325,8 +408,10 @@ app.post('/v1/chat/completions', async (req, res) => {
     if (!res.headersSent) {
       if (req.body.stream) {
         res.write(`data: ${JSON.stringify({ error: 'Internal server error' })}\n\n`);
+        console.log('=============== 服务器错误请求结束 ===============\n');
         return res.end();
       } else {
+        console.log('=============== 服务器错误请求结束 ===============\n');
         return res.status(500).json({ error: 'Internal server error' });
       }
     }
