@@ -12,6 +12,104 @@ const tokenUsageCount = new Map();
 // 添加 Map 用于存储 token 对应的 checksum
 const tokenChecksumMap = new Map();
 
+// 添加支持的模型列表
+const SUPPORTED_MODELS = [
+  {
+    id: "claude-3-5-sonnet-20241022",
+    created: 1706571819,
+    object: "model",
+    owned_by: "anthropic"
+  },
+  {
+    id: "claude-3-opus",
+    created: 1706571819,
+    object: "model",
+    owned_by: "anthropic"
+  },
+  {
+    id: "claude-3-5-haiku",
+    created: 1706571819,
+    object: "model",
+    owned_by: "anthropic"
+  },
+  {
+    id: "claude-3-5-sonnet",
+    created: 1706571819,
+    object: "model",
+    owned_by: "anthropic"
+  },
+  {
+    id: "cursor-small",
+    created: 1706571819,
+    object: "model",
+    owned_by: "cursor"
+  },
+  {
+    id: "gemini-exp-1206",
+    created: 1706571819,
+    object: "model",
+    owned_by: "google"
+  },
+  {
+    id: "gemini-2.0-flash-exp",
+    created: 1706571819,
+    object: "model",
+    owned_by: "google"
+  },
+  {
+    id: "gemini-2.0-flash-thinking-exp",
+    created: 1706571819,
+    object: "model",
+    owned_by: "google"
+  },
+  {
+    id: "gpt-3.5-turbo",
+    created: 1706571819,
+    object: "model",
+    owned_by: "openai"
+  },
+  {
+    id: "gpt-4",
+    created: 1706571819,
+    object: "model",
+    owned_by: "openai"
+  },
+  {
+    id: "gpt-4-turbo-2024-04-09",
+    created: 1706571819,
+    object: "model",
+    owned_by: "openai"
+  },
+  {
+    id: "gpt-4o",
+    created: 1706571819,
+    object: "model",
+    owned_by: "openai"
+  },
+  {
+    id: "gpt-4o-mini",
+    created: 1706571819,
+    object: "model",
+    owned_by: "openai"
+  },
+  {
+    id: "o1-mini",
+    created: 1706571819,
+    object: "model",
+    owned_by: "openai"
+  },
+  {
+    id: "o1-preview",
+    created: 1706571819,
+    object: "model",
+    owned_by: "openai"
+  }
+];
+
+// 在文件顶部添加
+const startTime = new Date();
+const version = '1.0.0';
+
 /**
  * 获取或生成 checksum
  * @param {string} token - 认证 token
@@ -19,31 +117,23 @@ const tokenChecksumMap = new Map();
  * @returns {string} checksum
  */
 function getOrCreateChecksum(token, req) {
-  const now = Date.now();
   const cached = tokenChecksumMap.get(token);
   
-  // 检查缓存是否过期（例如 24 小时）
-  if (cached && now - cached.timestamp < 24 * 60 * 60 * 1000) {
+  // 如果已有缓存直接返回
+  if (cached) {
     return cached.checksum;
   }
   
-  return req.headers['x-cursor-checksum'] ??
-         process.env['x-cursor-checksum'] ??
-         generateNewChecksum(token);
-}
-
-/**
- * 生成新的 checksum 并保存到 Map
- * @param {string} token - 认证 token
- * @returns {string} 新生成的 checksum
- */
-function generateNewChecksum(token) {
-  const checksum = `zo${getRandomIDPro({ dictType: 'max', size: 6 })}${
-    getRandomIDPro({ dictType: 'max', size: 64 })
-  }/${
-    getRandomIDPro({ dictType: 'max', size: 64 })
-  }`;
-  
+  // 如果没有缓存，按优先级获取或生成新的 checksum
+  const checksum = req.headers['x-cursor-checksum'] ??
+                  process.env['x-cursor-checksum'] ??
+                  `zo${getRandomIDPro({ dictType: 'max', size: 6 })}${
+                    getRandomIDPro({ dictType: 'max', size: 64 })
+                  }/${
+                    getRandomIDPro({ dictType: 'max', size: 64 })
+                  }`;
+                  
+  // 存入缓存
   tokenChecksumMap.set(token, {
     checksum,
     timestamp: Date.now()
@@ -95,10 +185,34 @@ function markTokenAsInvalid(token) {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// 添加根路径处理
+// 修改根路由
 app.get('/', (req, res) => {
-  res.json({ status: 'ok' });
+  const uptime = Math.floor((new Date() - startTime) / 1000); // 运行时间(秒)
+  
+  res.json({
+    status: 'healthy',
+    version,
+    uptime,
+    stats: {
+      started: startTime.toISOString(),
+      memory: `${(process.memoryUsage().heapUsed / (1024 * 1024)).toFixed(2)} MB`
+    },
+    models: SUPPORTED_MODELS.map(model => model.id),
+    endpoints: [
+      '/v1/chat/completions',
+      '/v1/models'
+    ]
+  });
 });
+
+// 添加新的路由处理模型列表请求
+app.get('/v1/models', (req, res) => {
+  res.json({
+    object: "list",
+    data: SUPPORTED_MODELS
+  });
+});
+
 app.post('/v1/chat/completions', async (req, res) => {
   // o1开头的模型，不支持流式输出
   if (req.body.model.startsWith('o1-') && req.body.stream) {
