@@ -95,6 +95,10 @@ function markTokenAsInvalid(token) {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// 添加根路径处理
+app.get('/', (req, res) => {
+  res.json({ status: 'ok' });
+});
 app.post('/v1/chat/completions', async (req, res) => {
   // o1开头的模型，不支持流式输出
   if (req.body.model.startsWith('o1-') && req.body.stream) {
